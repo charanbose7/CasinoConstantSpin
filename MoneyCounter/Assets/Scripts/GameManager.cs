@@ -1,23 +1,21 @@
 using DG.Tweening;
-using System;
 using System.Collections;
 using System.Collections.Generic;
 using TMPro;
-using Unity.Mathematics;
 using UnityEngine;
-using UnityEngine.UIElements;
 
 public class GameManager : MonoBehaviour
 {
     [SerializeField] private GameObject[] reels; // Assign Reel 1, 2, 3, 4, 5 in the Inspector
     [SerializeField] private float scrollDuration = 2f; // Duration of the scroll
     [SerializeField] private int increment = 2; // Increment value
+    [SerializeField] private GameObject spritePrefab; // Assign the sprite prefab in the Inspector
+    [SerializeField] private RectTransform textRectTransform; // The RectTransform of the TextMeshProUGUI
 
     private int[] reelValues = new int[5]; // To keep track of each reel's current value
     private int targetNumber; // Max value
     private int minNumber; // Min value
     private Coroutine scrollCoroutine; // To keep track of the current scrolling coroutine
-
     private RectTransform[][] reelTransforms; // Cached references to child RectTransforms
     private TextMeshProUGUI[][] reelTexts; // Cached references to TextMeshProUGUI components
 
@@ -47,6 +45,11 @@ public class GameManager : MonoBehaviour
 
             scrollCoroutine = StartCoroutine(ScrollReelsToTarget(targetNumber));
         }
+
+        if (Input.GetKeyDown(KeyCode.S))
+        {
+            PlaceSpritesOnLastThreeDigits();
+        }
     }
 
     private void CacheReelComponents()
@@ -72,7 +75,7 @@ public class GameManager : MonoBehaviour
     {
         for (int reelIndex = 0; reelIndex < reels.Length; reelIndex++)
         {
-            reelValues[reelIndex] = UnityEngine.Random.Range(0, 10);
+            reelValues[reelIndex] = Random.Range(0, 10);
             UpdateReel(reelIndex, reelValues[reelIndex]);
         }
     }
@@ -107,7 +110,7 @@ public class GameManager : MonoBehaviour
 
     private void SetRandomTargetNumber()
     {
-        minNumber = UnityEngine.Random.Range(0, (int)Mathf.Pow(10, reels.Length) - 1);
+        minNumber = Random.Range(0, (int)Mathf.Pow(10, reels.Length) - 1);
         targetNumber = minNumber + increment;
 
         Debug.Log("Min Number: " + minNumber);
@@ -185,5 +188,68 @@ public class GameManager : MonoBehaviour
             reelValues[reelIndex] = newReelValues[reelIndex];
             UpdateReel(reelIndex, reelValues[reelIndex]);
         }
+    }
+
+    private void PlaceSpritesOnLastThreeDigits()
+    {
+        string textValue = text.text;
+        List<int> numericCharIndices = new List<int>();
+
+        // Find indices of the last three numeric characters
+        for (int i = 0; i < textValue.Length; i++)
+        {
+            if (char.IsDigit(textValue[i]))
+            {
+                numericCharIndices.Add(i);
+            }
+        }
+
+        // Ensure we have at least 3 digits to work with
+        if (numericCharIndices.Count < 3)
+        {
+            Debug.LogWarning("Text has fewer than 3 numeric characters. Cannot place sprites.");
+            return;
+        }
+
+        // Get the positions of the last three numeric characters
+        for (int i = numericCharIndices.Count - 3; i < numericCharIndices.Count; i++)
+        {
+            int charIndex = numericCharIndices[i];
+
+            // Get the exact position of the character in local space
+            Vector3 charPosition = GetCharacterPosition(text, charIndex);
+
+            // Instantiate the sprite at the character's position
+            GameObject sprite = Instantiate(spritePrefab, textRectTransform);
+
+            // Align sprite with the character
+            RectTransform spriteRect = sprite.GetComponent<RectTransform>();
+            spriteRect.anchoredPosition = charPosition; // Use 2D anchoredPosition for RectTransform
+            spriteRect.localScale = Vector3.one; // Reset scaling to prevent distortions
+        }
+    }
+
+    private Vector3 GetCharacterPosition(TextMeshProUGUI tmp, int charIndex)
+    {
+        // Force the text to update its information
+        tmp.ForceMeshUpdate();
+
+        // Get the character info
+        TMP_CharacterInfo charInfo = tmp.textInfo.characterInfo[charIndex];
+
+        // Only proceed if the character is visible
+        if (!charInfo.isVisible) return Vector3.zero;
+
+        // Get the bottom left corner of the character in local space
+        Vector3 worldBottomLeft = charInfo.bottomLeft;
+        Vector3 worldTopRight = charInfo.topRight;
+
+        // Calculate the center of the character
+        Vector3 charCenter = (worldBottomLeft + worldTopRight) / 2;
+
+        // Convert the world space position to local space relative to the text RectTransform
+        Vector3 localPosition = textRectTransform.InverseTransformPoint(tmp.transform.TransformPoint(charCenter));
+
+        return new Vector3(localPosition.x, localPosition.y, 0f); // Returning a 2D anchored position
     }
 }
