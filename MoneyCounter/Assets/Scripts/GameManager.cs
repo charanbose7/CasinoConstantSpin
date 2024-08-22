@@ -9,13 +9,18 @@ public class GameManager : MonoBehaviour
     [SerializeField] private GameObject[] reels; // Assign Reel 1, 2, 3, 4, 5 in the Inspector
     [SerializeField] private float scrollDuration = 2f; // Duration of the scroll
     [SerializeField] private int increment = 2; // Increment value
+
     private int[] reelValues = new int[5]; // To keep track of each reel's current value
     private int targetNumber; // Max value
     private int minNumber; // Min value
     private Coroutine scrollCoroutine; // To keep track of the current scrolling coroutine
 
+    private RectTransform[][] reelTransforms; // Cached references to child RectTransforms
+    private TextMeshProUGUI[][] reelTexts; // Cached references to TextMeshProUGUI components
+
     private void Start()
     {
+        CacheReelComponents();
         InitializeReels();
         targetNumber = GetCurrentNumber(); // Start with the current number as target
     }
@@ -24,29 +29,37 @@ public class GameManager : MonoBehaviour
     {
         if (Input.GetKeyDown(KeyCode.Space))
         {
-            // Generate a random min value and calculate the target max value
-            minNumber = Random.Range(0, (int)Mathf.Pow(10, reels.Length) - 1);
-            targetNumber = minNumber + increment;
-
-            Debug.Log("Min Number: " + minNumber);
-            Debug.Log("Target Number: " + targetNumber);
-
-            // Set the reels to the min value first
+            SetRandomTargetNumber();
             SetReelsToValue(minNumber);
-
-            // If a scroll is already in progress, stop it and start a new one
-            /*if (scrollCoroutine != null)
-            {
-                StopCoroutine(scrollCoroutine);
-            }*/
-
-            // Start scrolling to the new target value
         }
 
         if (Input.GetKeyDown(KeyCode.A))
         {
+            if (scrollCoroutine != null)
+            {
+                StopCoroutine(scrollCoroutine);
+            }
 
             scrollCoroutine = StartCoroutine(ScrollReelsToTarget(targetNumber));
+        }
+    }
+
+    private void CacheReelComponents()
+    {
+        reelTransforms = new RectTransform[reels.Length][];
+        reelTexts = new TextMeshProUGUI[reels.Length][];
+
+        for (int i = 0; i < reels.Length; i++)
+        {
+            int childCount = reels[i].transform.childCount;
+            reelTransforms[i] = new RectTransform[childCount];
+            reelTexts[i] = new TextMeshProUGUI[childCount];
+
+            for (int j = 0; j < childCount; j++)
+            {
+                reelTransforms[i][j] = reels[i].transform.GetChild(j).GetComponent<RectTransform>();
+                reelTexts[i][j] = reelTransforms[i][j].GetComponent<TextMeshProUGUI>();
+            }
         }
     }
 
@@ -55,16 +68,15 @@ public class GameManager : MonoBehaviour
         for (int reelIndex = 0; reelIndex < reels.Length; reelIndex++)
         {
             reelValues[reelIndex] = Random.Range(0, 10);
-            UpdateReel(reels[reelIndex], reelValues[reelIndex]);
+            UpdateReel(reelIndex, reelValues[reelIndex]);
         }
     }
 
-    private void UpdateReel(GameObject reel, int startValue)
+    private void UpdateReel(int reelIndex, int startValue)
     {
-        for (int childIndex = 0; childIndex < reel.transform.childCount; childIndex++)
+        for (int childIndex = 0; childIndex < reelTransforms[reelIndex].Length; childIndex++)
         {
-            TextMeshProUGUI text = reel.transform.GetChild(childIndex).GetComponent<TextMeshProUGUI>();
-            text.text = ((startValue + childIndex) % 10).ToString();
+            reelTexts[reelIndex][childIndex].text = ((startValue + childIndex) % 10).ToString();
         }
     }
 
@@ -84,8 +96,17 @@ public class GameManager : MonoBehaviour
         for (int reelIndex = 0; reelIndex < reels.Length; reelIndex++)
         {
             reelValues[reelIndex] = int.Parse(valueStr[reelIndex].ToString());
-            UpdateReel(reels[reelIndex], reelValues[reelIndex]);
+            UpdateReel(reelIndex, reelValues[reelIndex]);
         }
+    }
+
+    private void SetRandomTargetNumber()
+    {
+        minNumber = Random.Range(0, (int)Mathf.Pow(10, reels.Length) - 1);
+        targetNumber = minNumber + increment;
+
+        Debug.Log("Min Number: " + minNumber);
+        Debug.Log("Target Number: " + targetNumber);
     }
 
     private IEnumerator ScrollReelsToTarget(int target)
@@ -111,7 +132,7 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        float scrollDistance = reels[0].transform.GetChild(0).GetComponent<RectTransform>().rect.height;
+        float scrollDistance = reelTransforms[0][0].rect.height;
 
         // Create a sequence to combine all the tweens
         Sequence sequence = DOTween.Sequence();
@@ -122,16 +143,13 @@ public class GameManager : MonoBehaviour
         // Animate each reel
         foreach (int reelIndex in reelsToScroll)
         {
-            Transform reelTransform = reels[reelIndex].transform;
-
-            // Track the new value for this reel
             int reelValue = reelValues[reelIndex];
             int newValue = (reelValue + 1) % 10;
             newReelValues[reelIndex] = newValue;
 
-            for (int childIndex = 0; childIndex < reelTransform.childCount; childIndex++)
+            for (int childIndex = 0; childIndex < reelTransforms[reelIndex].Length; childIndex++)
             {
-                Transform child = reelTransform.GetChild(childIndex);
+                RectTransform child = reelTransforms[reelIndex][childIndex];
                 float startY = child.localPosition.y;
                 float endY = startY + scrollDistance;
 
@@ -160,7 +178,7 @@ public class GameManager : MonoBehaviour
         foreach (var reelIndex in newReelValues.Keys)
         {
             reelValues[reelIndex] = newReelValues[reelIndex];
-            UpdateReel(reels[reelIndex], reelValues[reelIndex]);
+            UpdateReel(reelIndex, reelValues[reelIndex]);
         }
     }
 }
