@@ -1,115 +1,166 @@
+using DG.Tweening;
 using System.Collections;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 
 public class GameManager : MonoBehaviour
 {
-    public GameObject[] reels; // Assign Reel 1, 2, 3, 4, 5 in the Inspector
-    public float scrollDuration = 2f; // Duration of the scroll
+    [SerializeField] private GameObject[] reels; // Assign Reel 1, 2, 3, 4, 5 in the Inspector
+    [SerializeField] private float scrollDuration = 2f; // Duration of the scroll
+    [SerializeField] private int increment = 2; // Increment value
     private int[] reelValues = new int[5]; // To keep track of each reel's current value
+    private int targetNumber; // Max value
+    private int minNumber; // Min value
+    private Coroutine scrollCoroutine; // To keep track of the current scrolling coroutine
 
-    void Start()
+    private void Start()
     {
         InitializeReels();
-        StartCoroutine(ScrollReelsCoroutine());
+        targetNumber = GetCurrentNumber(); // Start with the current number as target
     }
 
-    void InitializeReels()
+    private void Update()
     {
-        for (int i = 0; i < reels.Length; i++)
+        if (Input.GetKeyDown(KeyCode.Space))
         {
-            // Assign random values to each child of the reel
-            reelValues[i] = Random.Range(0, 10);
-            UpdateReel(reels[i], reelValues[i]);
-        }
-    }
+            // Generate a random min value and calculate the target max value
+            minNumber = Random.Range(0, (int)Mathf.Pow(10, reels.Length) - 1);
+            targetNumber = minNumber + increment;
 
-    void UpdateReel(GameObject reel, int startValue)
-    {
-        for (int i = 0; i < reel.transform.childCount; i++)
-        {
-            TextMeshProUGUI text = reel.transform.GetChild(i).GetComponent<TextMeshProUGUI>();
-            text.text = ((startValue + i) % 10).ToString();
-        }
-    }
+            Debug.Log("Min Number: " + minNumber);
+            Debug.Log("Target Number: " + targetNumber);
 
-    IEnumerator ScrollReelsCoroutine()
-    {
-        while (true)
-        {
-            // Scroll the rightmost reel
-            yield return StartCoroutine(ScrollReel(reels.Length - 1));
-        }
-    }
+            // Set the reels to the min value first
+            SetReelsToValue(minNumber);
 
-    IEnumerator ScrollReel(int reelIndex)
-    {
-        Transform reelTransform = reels[reelIndex].transform;
-        float elapsedTime = 0f;
-        float scrollDistance = reelTransform.GetChild(0).GetComponent<RectTransform>().rect.height;
-
-        bool shouldScrollNextReel = (reelValues[reelIndex] == 9);
-
-        while (elapsedTime < scrollDuration)
-        {
-            for (int i = 0; i < reelTransform.childCount; i++)
+            // If a scroll is already in progress, stop it and start a new one
+            /*if (scrollCoroutine != null)
             {
-                Transform child = reelTransform.GetChild(i);
-                child.localPosition += Vector3.up * (scrollDistance / scrollDuration) * Time.deltaTime;
+                StopCoroutine(scrollCoroutine);
+            }*/
 
-                if (child.localPosition.y >= scrollDistance)
-                {
-                    // Move the child to the bottom of the hierarchy
-                    child.SetAsLastSibling();
-                    child.localPosition -= Vector3.up * scrollDistance;
+            // Start scrolling to the new target value
+        }
 
-                    // Update the text value
-                    int newValue = (reelValues[reelIndex] + 1) % 10;
-                    reelValues[reelIndex] = newValue;
-                    child.GetComponent<TextMeshProUGUI>().text = newValue.ToString();
-                }
+        if (Input.GetKeyDown(KeyCode.A))
+        {
+
+            scrollCoroutine = StartCoroutine(ScrollReelsToTarget(targetNumber));
+        }
+    }
+
+    private void InitializeReels()
+    {
+        for (int reelIndex = 0; reelIndex < reels.Length; reelIndex++)
+        {
+            reelValues[reelIndex] = Random.Range(0, 10);
+            UpdateReel(reels[reelIndex], reelValues[reelIndex]);
+        }
+    }
+
+    private void UpdateReel(GameObject reel, int startValue)
+    {
+        for (int childIndex = 0; childIndex < reel.transform.childCount; childIndex++)
+        {
+            TextMeshProUGUI text = reel.transform.GetChild(childIndex).GetComponent<TextMeshProUGUI>();
+            text.text = ((startValue + childIndex) % 10).ToString();
+        }
+    }
+
+    private int GetCurrentNumber()
+    {
+        int currentNumber = 0;
+        foreach (int reelValue in reelValues)
+        {
+            currentNumber = currentNumber * 10 + reelValue;
+        }
+        return currentNumber;
+    }
+
+    private void SetReelsToValue(int value)
+    {
+        string valueStr = value.ToString().PadLeft(reels.Length, '0');
+        for (int reelIndex = 0; reelIndex < reels.Length; reelIndex++)
+        {
+            reelValues[reelIndex] = int.Parse(valueStr[reelIndex].ToString());
+            UpdateReel(reels[reelIndex], reelValues[reelIndex]);
+        }
+    }
+
+    private IEnumerator ScrollReelsToTarget(int target)
+    {
+        int currentNumber = GetCurrentNumber();
+        while (currentNumber != target)
+        {
+            yield return StartCoroutine(ScrollReelsTogether(reels.Length - 1));
+            currentNumber = GetCurrentNumber();
+        }
+    }
+
+    private IEnumerator ScrollReelsTogether(int startReelIndex)
+    {
+        List<int> reelsToScroll = new List<int>();
+
+        for (int reelIndex = startReelIndex; reelIndex >= 0; reelIndex--)
+        {
+            reelsToScroll.Add(reelIndex);
+            if (reelValues[reelIndex] != 9)
+            {
+                break;
             }
+        }
 
-            elapsedTime += Time.deltaTime;
+        float scrollDistance = reels[0].transform.GetChild(0).GetComponent<RectTransform>().rect.height;
 
-            if (shouldScrollNextReel && reelIndex > 0)
+        // Create a sequence to combine all the tweens
+        Sequence sequence = DOTween.Sequence();
+
+        // Dictionary to track the new values for each reel
+        Dictionary<int, int> newReelValues = new Dictionary<int, int>();
+
+        // Animate each reel
+        foreach (int reelIndex in reelsToScroll)
+        {
+            Transform reelTransform = reels[reelIndex].transform;
+
+            // Track the new value for this reel
+            int reelValue = reelValues[reelIndex];
+            int newValue = (reelValue + 1) % 10;
+            newReelValues[reelIndex] = newValue;
+
+            for (int childIndex = 0; childIndex < reelTransform.childCount; childIndex++)
             {
-                // Scroll the next reel to the left simultaneously, but only once during the roll-over
-                Transform nextReelTransform = reels[reelIndex - 1].transform;
-                for (int i = 0; i < nextReelTransform.childCount; i++)
-                {
-                    Transform child = nextReelTransform.GetChild(i);
-                    child.localPosition += Vector3.up * (scrollDistance / scrollDuration) * Time.deltaTime;
+                Transform child = reelTransform.GetChild(childIndex);
+                float startY = child.localPosition.y;
+                float endY = startY + scrollDistance;
 
-                    if (child.localPosition.y >= scrollDistance)
+                // Create a tween to animate the child position
+                Tween tween = child.DOLocalMoveY(endY, scrollDuration)
+                    .SetEase(Ease.Linear)
+                    .OnUpdate(() =>
                     {
-                        // Move the child to the bottom of the hierarchy
-                        child.SetAsLastSibling();
-                        child.localPosition -= Vector3.up * scrollDistance;
+                        if (child.localPosition.y >= endY)
+                        {
+                            child.SetAsLastSibling();
+                            child.localPosition -= Vector3.up * scrollDistance;
+                        }
+                    });
 
-                        // Update the text value
-                        int newValue = (reelValues[reelIndex - 1] + 1) % 10;
-                        reelValues[reelIndex - 1] = newValue;
-                        child.GetComponent<TextMeshProUGUI>().text = newValue.ToString();
-                    }
-                }
+                // Add the tween to the sequence
+                sequence.Join(tween);
             }
-
-            yield return null;
         }
 
-        // After scrolling, update the reel values
-        UpdateReel(reels[reelIndex], reelValues[reelIndex]);
+        // Play the sequence and wait for it to complete
+        sequence.Play();
+        yield return sequence.WaitForCompletion();
 
-        // If the current reel was at 9 and should have triggered the next reel
-        if (shouldScrollNextReel && reelIndex > 0)
+        // Final update of reel values
+        foreach (var reelIndex in newReelValues.Keys)
         {
-            // Roll-over to the next reel
-            if (reelValues[reelIndex - 1] == 0)
-            {
-                // Continue with the rightmost reel
-                yield return ScrollReel(reelIndex);
-            }
+            reelValues[reelIndex] = newReelValues[reelIndex];
+            UpdateReel(reels[reelIndex], reelValues[reelIndex]);
         }
     }
 }
