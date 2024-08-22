@@ -1,8 +1,11 @@
 using DG.Tweening;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using TMPro;
+using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 public class GameManager : MonoBehaviour
 {
@@ -17,6 +20,8 @@ public class GameManager : MonoBehaviour
 
     private RectTransform[][] reelTransforms; // Cached references to child RectTransforms
     private TextMeshProUGUI[][] reelTexts; // Cached references to TextMeshProUGUI components
+
+    [SerializeField] TextMeshProUGUI text;
 
     private void Start()
     {
@@ -67,7 +72,7 @@ public class GameManager : MonoBehaviour
     {
         for (int reelIndex = 0; reelIndex < reels.Length; reelIndex++)
         {
-            reelValues[reelIndex] = Random.Range(0, 10);
+            reelValues[reelIndex] = UnityEngine.Random.Range(0, 10);
             UpdateReel(reelIndex, reelValues[reelIndex]);
         }
     }
@@ -102,7 +107,7 @@ public class GameManager : MonoBehaviour
 
     private void SetRandomTargetNumber()
     {
-        minNumber = Random.Range(0, (int)Mathf.Pow(10, reels.Length) - 1);
+        minNumber = UnityEngine.Random.Range(0, (int)Mathf.Pow(10, reels.Length) - 1);
         targetNumber = minNumber + increment;
 
         Debug.Log("Min Number: " + minNumber);
