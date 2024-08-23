@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 public class GameManager : MonoBehaviour
 {
@@ -20,6 +21,7 @@ public class GameManager : MonoBehaviour
     private TextMeshProUGUI[][] reelTexts; // Cached references to TextMeshProUGUI components
 
     [SerializeField] TextMeshProUGUI text;
+    [SerializeField] GameObject numberHolder;
 
     private void Start()
     {
@@ -192,10 +194,13 @@ public class GameManager : MonoBehaviour
 
     private void PlaceSpritesOnLastThreeDigits()
     {
+        // Get the number of children to determine how many sprites to place
+        int childCount = numberHolder.transform.childCount;
         string textValue = text.text;
+
         List<int> numericCharIndices = new List<int>();
 
-        // Find indices of the last three numeric characters
+        // Find indices of all numeric characters in the text
         for (int i = 0; i < textValue.Length; i++)
         {
             if (char.IsDigit(textValue[i]))
@@ -203,33 +208,67 @@ public class GameManager : MonoBehaviour
                 numericCharIndices.Add(i);
             }
         }
-
-        // Ensure we have at least 3 digits to work with
-        if (numericCharIndices.Count < 3)
+        var y = GetCharacterPosition(text, 0, out Vector2 yPos);
+        // Ensure there are enough digits
+        if (numericCharIndices.Count < childCount)
         {
-            Debug.LogWarning("Text has fewer than 3 numeric characters. Cannot place sprites.");
+            Debug.LogWarning("Not enough numeric characters in text to match child count.");
             return;
         }
 
-        // Get the positions of the last three numeric characters
-        for (int i = numericCharIndices.Count - 3; i < numericCharIndices.Count; i++)
+        // Process the last 'childCount' numeric characters
+        List<Vector3> charPositions = new List<Vector3>();
+        List<Vector2> charSizes = new List<Vector2>();
+
+        for (int i = numericCharIndices.Count - childCount; i < numericCharIndices.Count; i++)
         {
             int charIndex = numericCharIndices[i];
+            Vector3 charPosition = GetCharacterPosition(text, charIndex, out Vector2 charSize);
+            charPositions.Add(charPosition);
+            charSizes.Add(charSize);
+        }
 
-            // Get the exact position of the character in local space
-            Vector3 charPosition = GetCharacterPosition(text, charIndex);
+        // Make the last 'childCount' numeric characters invisible
+        for (int i = numericCharIndices.Count - childCount; i < numericCharIndices.Count; i++)
+        {
+            int charIndex = numericCharIndices[i];
+            TMP_CharacterInfo charInfo = text.textInfo.characterInfo[charIndex];
+            int meshIndex = charInfo.materialReferenceIndex;
+            text.textInfo.meshInfo[meshIndex].colors32[charInfo.vertexIndex + 0] = new Color32(0, 0, 0, 0);
+            text.textInfo.meshInfo[meshIndex].colors32[charInfo.vertexIndex + 1] = new Color32(0, 0, 0, 0);
+            text.textInfo.meshInfo[meshIndex].colors32[charInfo.vertexIndex + 2] = new Color32(0, 0, 0, 0);
+            text.textInfo.meshInfo[meshIndex].colors32[charInfo.vertexIndex + 3] = new Color32(0, 0, 0, 0);
+        }
 
-            // Instantiate the sprite at the character's position
-            GameObject sprite = Instantiate(spritePrefab, textRectTransform);
+        // Apply changes to the text mesh
+        text.UpdateVertexData(TMP_VertexDataUpdateFlags.All);
 
-            // Align sprite with the character
-            RectTransform spriteRect = sprite.GetComponent<RectTransform>();
-            spriteRect.anchoredPosition = charPosition; // Use 2D anchoredPosition for RectTransform
-            spriteRect.localScale = Vector3.one; // Reset scaling to prevent distortions
+        // Place sprites on top of the invisible text and adjust their properties
+        for (int i = 0; i < charPositions.Count; i++)
+        {
+            // Get the current child of numberHolder
+            GameObject child = numberHolder.transform.GetChild(i).gameObject;
+            RectTransform childRect = child.GetComponent<RectTransform>();
+
+            var height = (charSizes[i].y * childCount);
+            // Set the child dimensions
+            childRect.sizeDelta = new Vector2(charSizes[i].x, height);
+
+            // Set the child position
+            childRect.anchoredPosition = new Vector2(charPositions[i].x, (charSizes[i].y) / 10);//yPos.y - (charSizes[i].y)/2
+
+
+
+            // Optional: Match the text size of the child object (if it has a TextMeshPro component)
+            TextMeshProUGUI childText = child.GetComponentInChildren<TextMeshProUGUI>();
+            if (childText != null)
+            {
+                childText.fontSize = text.fontSize; // Match the font size of the main text
+            }
         }
     }
 
-    private Vector3 GetCharacterPosition(TextMeshProUGUI tmp, int charIndex)
+    private Vector3 GetCharacterPosition(TextMeshProUGUI tmp, int charIndex, out Vector2 charSize)
     {
         // Force the text to update its information
         tmp.ForceMeshUpdate();
@@ -238,11 +277,20 @@ public class GameManager : MonoBehaviour
         TMP_CharacterInfo charInfo = tmp.textInfo.characterInfo[charIndex];
 
         // Only proceed if the character is visible
-        if (!charInfo.isVisible) return Vector3.zero;
+        if (!charInfo.isVisible)
+        {
+            charSize = Vector2.zero;
+            return Vector3.zero;
+        }
 
-        // Get the bottom left corner of the character in local space
+        // Get the bottom left and top right corners of the character in local space
         Vector3 worldBottomLeft = charInfo.bottomLeft;
         Vector3 worldTopRight = charInfo.topRight;
+
+        // Calculate the width and height of the character
+        float width = worldTopRight.x - worldBottomLeft.x;
+        float height = worldTopRight.y - worldBottomLeft.y;
+        charSize = new Vector2(width, height);
 
         // Calculate the center of the character
         Vector3 charCenter = (worldBottomLeft + worldTopRight) / 2;
