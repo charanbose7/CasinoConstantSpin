@@ -3,34 +3,39 @@ using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
+using static Unity.VisualScripting.Metadata;
 
 public class GameManager : MonoBehaviour
 {
     [SerializeField] private GameObject[] reels; // Assign Reel 1, 2, 3, 4, 5 in the Inspector
     [SerializeField] private float scrollDuration = 2f; // Duration of the scroll
-    [SerializeField] private int increment = 2; // Increment value
+    [SerializeField] private float increment = 2.00f; // Increment value as float
     [SerializeField] private GameObject spritePrefab; // Assign the sprite prefab in the Inspector
     [SerializeField] private RectTransform textRectTransform; // The RectTransform of the TextMeshProUGUI
+    [SerializeField] private TextMeshProUGUI text;
+    [SerializeField] private GameObject numberHolder;
 
     private int[] reelValues = new int[5]; // To keep track of each reel's current value
-    private int targetNumber; // Max value
-    private int minNumber; // Min value
+    private float targetNumber; // Max value
+    private float minNumber; // Min value
     private Coroutine scrollCoroutine; // To keep track of the current scrolling coroutine
     private RectTransform[][] reelTransforms; // Cached references to child RectTransforms
     private TextMeshProUGUI[][] reelTexts; // Cached references to TextMeshProUGUI components
 
-    [SerializeField] TextMeshProUGUI text;
-    [SerializeField] GameObject numberHolder;
-
     private void Start()
     {
+        ValidateIncrement();
         CacheReelComponents();
         InitializeReels();
         targetNumber = GetCurrentNumber(); // Start with the current number as target
     }
 
     private void Update()
+    {
+        HandleInput();
+    }
+
+    private void HandleInput()
     {
         if (Input.GetKeyDown(KeyCode.Space))
         {
@@ -40,17 +45,21 @@ public class GameManager : MonoBehaviour
 
         if (Input.GetKeyDown(KeyCode.A))
         {
-            if (scrollCoroutine != null)
-            {
-                StopCoroutine(scrollCoroutine);
-            }
-
-            scrollCoroutine = StartCoroutine(ScrollReelsToTarget(targetNumber));
+            StartScrollingReels();
         }
 
         if (Input.GetKeyDown(KeyCode.S))
         {
             PlaceSpritesOnLastThreeDigits();
+        }
+    }
+
+    private void ValidateIncrement()
+    {
+        float roundedIncrement = Mathf.Round(increment * 100f) / 100f;
+        if (Mathf.Abs(increment - roundedIncrement) > Mathf.Epsilon)
+        {
+            Debug.LogError("Increment value must have only two decimal places!");
         }
     }
 
@@ -90,39 +99,56 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    private int GetCurrentNumber()
+    private float GetCurrentNumber()
     {
-        int currentNumber = 0;
-        foreach (int reelValue in reelValues)
+        string currentNumberStr = "";
+        for (int i = 0; i < reelValues.Length; i++)
         {
-            currentNumber = currentNumber * 10 + reelValue;
+            currentNumberStr += reelValues[i].ToString();
+            if (i == reelValues.Length - 2) // Place the decimal point before the last two digits
+            {
+                currentNumberStr += ".";
+            }
         }
-        return currentNumber;
+        return float.Parse(currentNumberStr);
     }
 
-    private void SetReelsToValue(int value)
+    private void SetReelsToValue(float value)
     {
-        string valueStr = value.ToString().PadLeft(reels.Length, '0');
+        string valueStr = value.ToString("F2").Replace(".", "").PadLeft(reels.Length, '0');
+
         for (int reelIndex = 0; reelIndex < reels.Length; reelIndex++)
         {
             reelValues[reelIndex] = int.Parse(valueStr[reelIndex].ToString());
             UpdateReel(reelIndex, reelValues[reelIndex]);
         }
+
+        Debug.Log($"Final Reel Values: {string.Join(", ", reelValues)}");
     }
 
     private void SetRandomTargetNumber()
     {
-        minNumber = Random.Range(0, (int)Mathf.Pow(10, reels.Length) - 1);
+        minNumber = Random.Range(0f, Mathf.Pow(10, reels.Length - 2) - 1f);
+        minNumber = Mathf.Round(minNumber * 100f) / 100f;
         targetNumber = minNumber + increment;
 
-        Debug.Log("Min Number: " + minNumber);
-        Debug.Log("Target Number: " + targetNumber);
+        Debug.Log($"Min Number: {minNumber}");
+        Debug.Log($"Target Number: {targetNumber}");
     }
 
-    private IEnumerator ScrollReelsToTarget(int target)
+    private void StartScrollingReels()
     {
-        int currentNumber = GetCurrentNumber();
-        while (currentNumber != target)
+        if (scrollCoroutine != null)
+        {
+            StopCoroutine(scrollCoroutine);
+        }
+        scrollCoroutine = StartCoroutine(ScrollReelsToTarget(targetNumber));
+    }
+
+    private IEnumerator ScrollReelsToTarget(float target)
+    {
+        float currentNumber = GetCurrentNumber();
+        while (Mathf.Abs(currentNumber - target) > Mathf.Epsilon)
         {
             yield return StartCoroutine(ScrollReelsTogether(reels.Length - 1));
             currentNumber = GetCurrentNumber();
@@ -130,6 +156,28 @@ public class GameManager : MonoBehaviour
     }
 
     private IEnumerator ScrollReelsTogether(int startReelIndex)
+    {
+        List<int> reelsToScroll = GetReelsToScroll(startReelIndex);
+        float scrollDistance = reelTransforms[0][0].rect.height;
+        Sequence sequence = DOTween.Sequence();
+        Dictionary<int, int> newReelValues = new Dictionary<int, int>();
+
+        foreach (int reelIndex in reelsToScroll)
+        {
+            int newValue = (reelValues[reelIndex] + 1) % 10;
+            newReelValues[reelIndex] = newValue;
+
+            Tween tween = ScrollReel(reelIndex, scrollDistance);
+            sequence.Join(tween);
+        }
+
+        sequence.Play();
+        yield return sequence.WaitForCompletion();
+
+        UpdateReelValues(newReelValues);
+    }
+
+    private List<int> GetReelsToScroll(int startReelIndex)
     {
         List<int> reelsToScroll = new List<int>();
 
@@ -142,49 +190,37 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        float scrollDistance = reelTransforms[0][0].rect.height;
+        return reelsToScroll;
+    }
 
-        // Create a sequence to combine all the tweens
+    private Tween ScrollReel(int reelIndex, float scrollDistance)
+    {
         Sequence sequence = DOTween.Sequence();
 
-        // Dictionary to track the new values for each reel
-        Dictionary<int, int> newReelValues = new Dictionary<int, int>();
-
-        // Animate each reel
-        foreach (int reelIndex in reelsToScroll)
+        foreach (RectTransform child in reelTransforms[reelIndex])
         {
-            int reelValue = reelValues[reelIndex];
-            int newValue = (reelValue + 1) % 10;
-            newReelValues[reelIndex] = newValue;
+            float startY = child.localPosition.y;
+            float endY = startY + scrollDistance;
 
-            for (int childIndex = 0; childIndex < reelTransforms[reelIndex].Length; childIndex++)
-            {
-                RectTransform child = reelTransforms[reelIndex][childIndex];
-                float startY = child.localPosition.y;
-                float endY = startY + scrollDistance;
-
-                // Create a tween to animate the child position
-                Tween tween = child.DOLocalMoveY(endY, scrollDuration)
-                    .SetEase(Ease.Linear)
-                    .OnUpdate(() =>
+            Tween tween = child.DOLocalMoveY(endY, scrollDuration)
+                .SetEase(Ease.Linear)
+                .OnUpdate(() =>
+                {
+                    if (child.localPosition.y >= endY)
                     {
-                        if (child.localPosition.y >= endY)
-                        {
-                            child.SetAsLastSibling();
-                            child.localPosition -= Vector3.up * scrollDistance;
-                        }
-                    });
+                        child.SetAsLastSibling();
+                        child.localPosition -= Vector3.up * scrollDistance;
+                    }
+                });
 
-                // Add the tween to the sequence
-                sequence.Join(tween);
-            }
+            sequence.Join(tween);
         }
 
-        // Play the sequence and wait for it to complete
-        sequence.Play();
-        yield return sequence.WaitForCompletion();
+        return sequence;
+    }
 
-        // Final update of reel values
+    private void UpdateReelValues(Dictionary<int, int> newReelValues)
+    {
         foreach (var reelIndex in newReelValues.Keys)
         {
             reelValues[reelIndex] = newReelValues[reelIndex];
@@ -194,29 +230,17 @@ public class GameManager : MonoBehaviour
 
     private void PlaceSpritesOnLastThreeDigits()
     {
-        // Get the number of children to determine how many sprites to place
         int childCount = numberHolder.transform.childCount;
         string textValue = text.text;
 
-        List<int> numericCharIndices = new List<int>();
+        List<int> numericCharIndices = GetNumericCharIndices(textValue);
 
-        // Find indices of all numeric characters in the text
-        for (int i = 0; i < textValue.Length; i++)
-        {
-            if (char.IsDigit(textValue[i]))
-            {
-                numericCharIndices.Add(i);
-            }
-        }
-        var y = GetCharacterPosition(text, 0, out Vector2 yPos);
-        // Ensure there are enough digits
         if (numericCharIndices.Count < childCount)
         {
             Debug.LogWarning("Not enough numeric characters in text to match child count.");
             return;
         }
 
-        // Process the last 'childCount' numeric characters
         List<Vector3> charPositions = new List<Vector3>();
         List<Vector2> charSizes = new List<Vector2>();
 
@@ -228,76 +252,76 @@ public class GameManager : MonoBehaviour
             charSizes.Add(charSize);
         }
 
-        // Make the last 'childCount' numeric characters invisible
+        MakeCharactersInvisible(numericCharIndices, childCount);
+
+        PlaceReelsOnCharacters(charPositions, charSizes);
+    }
+
+    private List<int> GetNumericCharIndices(string textValue)
+    {
+        List<int> numericCharIndices = new List<int>();
+
+        for (int i = 0; i < textValue.Length; i++)
+        {
+            if (char.IsDigit(textValue[i]))
+            {
+                numericCharIndices.Add(i);
+            }
+        }
+
+        return numericCharIndices;
+    }
+
+    private void MakeCharactersInvisible(List<int> numericCharIndices, int childCount)
+    {
+        text.ForceMeshUpdate(); // Ensure the text mesh is up-to-date
+
+        // Iterate over the indices of the characters to make invisible
         for (int i = numericCharIndices.Count - childCount; i < numericCharIndices.Count; i++)
         {
             int charIndex = numericCharIndices[i];
             TMP_CharacterInfo charInfo = text.textInfo.characterInfo[charIndex];
             int meshIndex = charInfo.materialReferenceIndex;
-            text.textInfo.meshInfo[meshIndex].colors32[charInfo.vertexIndex + 0] = new Color32(0, 0, 0, 0);
-            text.textInfo.meshInfo[meshIndex].colors32[charInfo.vertexIndex + 1] = new Color32(0, 0, 0, 0);
-            text.textInfo.meshInfo[meshIndex].colors32[charInfo.vertexIndex + 2] = new Color32(0, 0, 0, 0);
-            text.textInfo.meshInfo[meshIndex].colors32[charInfo.vertexIndex + 3] = new Color32(0, 0, 0, 0);
+
+            // Make sure the character's color is set to fully transparent
+            Color32[] vertexColors = text.textInfo.meshInfo[meshIndex].colors32;
+            int vertexIndex = charInfo.vertexIndex;
+
+            vertexColors[vertexIndex + 0] = new Color32(0, 0, 0, 0); // Bottom-left vertex
+            vertexColors[vertexIndex + 1] = new Color32(0, 0, 0, 0); // Bottom-right vertex
+            vertexColors[vertexIndex + 2] = new Color32(0, 0, 0, 0); // Top-right vertex
+            vertexColors[vertexIndex + 3] = new Color32(0, 0, 0, 0); // Top-left vertex
         }
 
         // Apply changes to the text mesh
         text.UpdateVertexData(TMP_VertexDataUpdateFlags.All);
+    }
 
-        // Place sprites on top of the invisible text and adjust their properties
-        for (int i = 0; i < charPositions.Count; i++)
+    private void PlaceReelsOnCharacters(List<Vector3> charPositions, List<Vector2> charSizes)
+    {
+        for (int i = 0; i < numberHolder.transform.childCount; i++)
         {
-            // Get the current child of numberHolder
-            GameObject child = numberHolder.transform.GetChild(i).gameObject;
-            RectTransform childRect = child.GetComponent<RectTransform>();
+            RectTransform reelRect = numberHolder.transform.GetChild(i).GetComponent<RectTransform>();
 
-            var height = (charSizes[i].y * childCount);
+            Vector3 position = charPositions[i];
+            Vector2 size = charSizes[i];
+            reelRect.position = position;
+            reelRect.sizeDelta = size;
+
+            /*var height = (charSizes[i].y * numberHolder.transform.childCount);
             // Set the child dimensions
-            childRect.sizeDelta = new Vector2(charSizes[i].x, height);
+            reelRect.sizeDelta = new Vector2(charSizes[i].x, height);
 
             // Set the child position
-            childRect.anchoredPosition = new Vector2(charPositions[i].x, (charSizes[i].y) / 10);//yPos.y - (charSizes[i].y)/2
-
-
-
-            // Optional: Match the text size of the child object (if it has a TextMeshPro component)
-            TextMeshProUGUI childText = child.GetComponentInChildren<TextMeshProUGUI>();
-            if (childText != null)
-            {
-                childText.fontSize = text.fontSize; // Match the font size of the main text
-            }
+            reelRect.anchoredPosition = new Vector2(charPositions[i].x, (charSizes[i].y) / 10);//yPos.y - (charSizes[i].y)/2
+            */
         }
     }
 
-    private Vector3 GetCharacterPosition(TextMeshProUGUI tmp, int charIndex, out Vector2 charSize)
+    private Vector3 GetCharacterPosition(TextMeshProUGUI textComponent, int charIndex, out Vector2 charSize)
     {
-        // Force the text to update its information
-        tmp.ForceMeshUpdate();
-
-        // Get the character info
-        TMP_CharacterInfo charInfo = tmp.textInfo.characterInfo[charIndex];
-
-        // Only proceed if the character is visible
-        if (!charInfo.isVisible)
-        {
-            charSize = Vector2.zero;
-            return Vector3.zero;
-        }
-
-        // Get the bottom left and top right corners of the character in local space
-        Vector3 worldBottomLeft = charInfo.bottomLeft;
-        Vector3 worldTopRight = charInfo.topRight;
-
-        // Calculate the width and height of the character
-        float width = worldTopRight.x - worldBottomLeft.x;
-        float height = worldTopRight.y - worldBottomLeft.y;
-        charSize = new Vector2(width, height);
-
-        // Calculate the center of the character
-        Vector3 charCenter = (worldBottomLeft + worldTopRight) / 2;
-
-        // Convert the world space position to local space relative to the text RectTransform
-        Vector3 localPosition = textRectTransform.InverseTransformPoint(tmp.transform.TransformPoint(charCenter));
-
-        return new Vector3(localPosition.x, localPosition.y, 0f); // Returning a 2D anchored position
+        TMP_CharacterInfo charInfo = textComponent.textInfo.characterInfo[charIndex];
+        charSize = charInfo.ascender - charInfo.descender > 0 ? new Vector2(charInfo.xAdvance, charInfo.ascender - charInfo.descender) : Vector2.zero;
+        return textComponent.transform.TransformPoint((charInfo.bottomLeft + charInfo.topRight) / 2);
     }
 }
